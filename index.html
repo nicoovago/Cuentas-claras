@@ -96,6 +96,7 @@ button.b:disabled{opacity:.45;cursor:not-allowed}
 .campo{margin-bottom:12px}
 .campo label{display:block;font-family:'IBM Plex Mono',monospace;font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--humo);margin-bottom:5px}
 .campo select,.campo input,.campo textarea{width:100%}
+.muestra{font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--humo);margin-top:5px;padding-left:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-height:14px}
 textarea{min-height:120px;resize:vertical;font-family:'IBM Plex Mono',monospace;font-size:12px}
 .modal-acc{display:flex;gap:8px;margin-top:16px}
 .aviso{font-size:12.5px;color:var(--ocre);margin-top:10px;min-height:16px}
@@ -155,10 +156,10 @@ textarea{min-height:120px;resize:vertical;font-family:'IBM Plex Mono',monospace;
   <div class="modal" role="dialog" aria-modal="true" aria-labelledby="t-map">
     <h2 id="t-map">Qué es cada columna</h2>
     <p class="hint" id="map-hint"></p>
-    <div class="campo"><label for="m-fecha">Fecha</label><select id="m-fecha"></select></div>
-    <div class="campo"><label for="m-nombre">Nombre de quien pagó</label><select id="m-nombre"></select></div>
-    <div class="campo"><label for="m-monto">Monto</label><select id="m-monto"></select></div>
-    <div class="campo"><label for="m-detalle">Detalle (opcional)</label><select id="m-detalle"></select></div>
+    <div class="campo"><label for="m-fecha">Fecha</label><select id="m-fecha"></select><div class="muestra" id="mu-fecha"></div></div>
+    <div class="campo"><label for="m-nombre">Nombre de quien pagó</label><select id="m-nombre"></select><div class="muestra" id="mu-nombre"></div></div>
+    <div class="campo"><label for="m-monto">Monto</label><select id="m-monto"></select><div class="muestra" id="mu-monto"></div></div>
+    <div class="campo"><label for="m-detalle">Detalle (opcional)</label><select id="m-detalle"></select><div class="muestra" id="mu-detalle"></div></div>
     <div class="aviso" id="map-aviso"></div>
     <div class="modal-acc">
       <button class="b" data-cerrar>Cancelar</button>
@@ -312,20 +313,47 @@ function detectar(cols, candidatas){
     const hit = cols.find(col => norm(col) === c);
     if(hit) return hit;
   }
+  // coincidencia parcial solo con candidatas largas: si no, "DEBITS" matchea "de"
   for(const c of candidatas){
+    if(c.length < 5) continue;
     const hit = cols.find(col => norm(col).includes(c));
     if(hit) return hit;
   }
   return '';
 }
 const CAND = {
-  fecha:  ['release_date','date_created','fecha de origen','fecha','date','fecha de liberacion','money_release_date','fecha de aprobacion'],
-  nombre: ['payer_name','nombre','contraparte','payer','cliente','nombre del pagador','buyer','origen del dinero','remitente','de'],
-  monto:  ['net_credit_amount','transaction_net_amount','valor','importe','monto','amount','net_amount','transaction_amount','gross_amount','saldo a favor'],
-  detalle:['description','descripcion','detalle','reason','concepto','payment_method','medio de pago','operacion']
+  fecha:  ['release_date','settlement_date','transaction_date','date_created','money_release_date','fecha de origen','fecha de liberacion','fecha de aprobacion','fecha','date'],
+  nombre: ['payer_name','payer_nickname','buyer_name','nombre del pagador','contraparte','nombre','cliente','payer','comprador','transaction_type','descripcion','description'],
+  monto:  ['net_credit_amount','transaction_net_amount','settlement_net_amount','net_amount','transaction_amount','gross_amount','importe','valor','monto','amount'],
+  detalle:['description','descripcion','detalle','concepto','reason','payment_method','medio de pago','transaction_type','record_type'],
+  id:     ['reference_id','source_id','operation_id','transaction_id','id de operacion','numero de operacion','id']
 };
 
 /* ---------------- formato ---------------- */
+/* En los reportes de Mercado Pago el nombre de la contraparte viene pegado
+   al concepto: "Transferencia recibida Rodrigo M", "Pago con QR YPF".
+   Separamos el prefijo conocido del nombre que queda atrás. */
+const PREFIJOS = [
+  'transferencia recibida','transferencia enviada','transferencia',
+  'devolucion de dinero','devolucion','reintegro',
+  'pago con dinero en cuenta','pago con tarjeta de credito','pago con tarjeta de debito',
+  'pago con tarjeta','pago con link','pago con qr','pago con','pago a','cobro de','cobro',
+  'ingreso de dinero','retiro de dinero','ajuste de','rendimientos','recarga de'
+];
+function separarConcepto(txt){
+  const t = String(txt ?? '').replace(/\s+/g,' ').trim();
+  if(!t) return { nombre:'', concepto:'' };
+  const n = norm(t);
+  let mejor = '';
+  for(const p of PREFIJOS){
+    if(n.startsWith(p) && p.length > mejor.length) mejor = p;
+  }
+  if(!mejor) return { nombre:t, concepto:'' };
+  const concepto = t.slice(0, mejor.length).trim();
+  const resto = t.slice(mejor.length).trim().replace(/^[-–—:·,]\s*/,'');
+  return resto ? { nombre:resto, concepto } : { nombre:concepto, concepto:'' };
+}
+
 const fmt = new Intl.NumberFormat('es-AR',{style:'currency',currency:'ARS',maximumFractionDigits:2});
 const plata = n => fmt.format(n).replace(/\s/g,' ');
 const DIAS = ['dom','lun','mar','mié','jue','vie','sáb'];
@@ -453,22 +481,73 @@ function leerCSV(texto){
     alert('No se cargó el lector de CSV. Revisá la conexión y recargá la página.');
     return;
   }
-  const res = Papa.parse(texto.trim(), { header:true, skipEmptyLines:true, delimiter:'' });
-  const cols = (res.meta.fields || []).filter(Boolean);
-  if(!cols.length || !res.data.length){ alert('No pude leer ese archivo. Fijate que sea un CSV con una fila de encabezados.'); return; }
-  pendiente = { filas:res.data, columnas:cols };
+  const res = Papa.parse(texto.replace(/^\ufeff/,'').trim(), { header:false, skipEmptyLines:false });
+  const crudas = (res.data || []).filter(Array.isArray);
+  if(!crudas.length){ alert('El archivo está vacío o no pude leerlo.'); return; }
+
+  // Los reportes de Mercado Pago traen un bloque de resumen arriba y la tabla
+  // de movimientos más abajo, separados por una línea en blanco. Nos quedamos
+  // con el bloque que tenga más filas: esa es la tabla que interesa.
+  const bloques = [];
+  let actual = [];
+  for(const f of crudas){
+    const vacia = f.every(c => String(c ?? '').trim() === '');
+    if(vacia){ if(actual.length) bloques.push(actual); actual = []; }
+    else actual.push(f);
+  }
+  if(actual.length) bloques.push(actual);
+
+  const bloque = bloques.reduce((a,b) => (b.length > a.length ? b : a), []);
+  if(bloque.length < 2){ alert('No encontré filas de movimientos en ese archivo.'); return; }
+
+  // encabezados: sin vacíos y sin repetidos
+  const cuenta = {};
+  const columnas = bloque[0].map((c,i) => {
+    let n = String(c ?? '').trim() || `Columna ${i+1}`;
+    cuenta[n] = (cuenta[n] || 0) + 1;
+    return cuenta[n] > 1 ? `${n} (${cuenta[n]})` : n;
+  });
+  const datos = bloque.slice(1).map(r => {
+    const o = {};
+    columnas.forEach((c,i) => { o[c] = r[i] ?? ''; });
+    return o;
+  });
+
+  pendiente = { filas:datos, columnas, bloques:bloques.length };
   abrirMapeo();
 }
+function muestra(campo){
+  const col = document.getElementById('m-'+campo).value;
+  const el = document.getElementById('mu-'+campo);
+  if(!col){ el.textContent = ''; return; }
+  const val = (pendiente.filas.find(f => String(f[col] ?? '').trim() !== '') || {})[col];
+  if(!val){ el.textContent = 'esta columna viene vacía'; return; }
+  const texto = campo === 'nombre' ? (separarConcepto(val).nombre || String(val)) : String(val);
+  el.textContent = `ej.: ${texto.slice(0,44)}`;
+}
 function abrirMapeo(){
-  const {columnas, filas} = pendiente;
-  document.getElementById('map-hint').textContent = `${filas.length} filas leídas. Revisá que estas sean las columnas correctas.`;
+  const {columnas, filas, bloques} = pendiente;
+  document.getElementById('map-hint').textContent =
+    `${filas.length} movimientos encontrados${bloques > 1 ? ' (salteé el resumen del principio)' : ''}. Elegí qué columna es cada cosa; abajo de cada una ves un ejemplo.`;
+  const opciones = columnas.map(c => `<option value="${escapar(c)}">${escapar(c)}</option>`).join('');
+  const vacia = {
+    fecha:'<option value="">— elegí una —</option>',
+    monto:'<option value="">— elegí una —</option>',
+    nombre:'<option value="">— sin nombre —</option>',
+    detalle:'<option value="">— ninguna —</option>'
+  };
+  const hallado = {};
   for(const campo of ['fecha','nombre','monto','detalle']){
     const sel = document.getElementById('m-'+campo);
-    sel.innerHTML = (campo === 'detalle' ? '<option value="">— ninguna —</option>' : '') +
-      columnas.map(c => `<option value="${escapar(c)}">${escapar(c)}</option>`).join('');
-    const guess = detectar(columnas, CAND[campo]);
-    if(guess) sel.value = guess;
+    sel.innerHTML = vacia[campo] + opciones;
+    hallado[campo] = detectar(columnas, CAND[campo]);
+    sel.value = hallado[campo] || '';
+    sel.onchange = () => { muestra(campo); if(campo === 'detalle') muestra('nombre'); };
   }
+  // Mercado Pago mete el nombre dentro del concepto: si detalle apunta a la
+  // misma columna que el nombre, la dejamos vacía para no repetir el texto
+  if(hallado.detalle && hallado.detalle === hallado.nombre) document.getElementById('m-detalle').value = '';
+  ['fecha','nombre','monto','detalle'].forEach(muestra);
   document.getElementById('map-aviso').textContent = '';
   abrir('velo-map');
 }
@@ -477,22 +556,36 @@ async function confirmarMapeo(){
   const cN = document.getElementById('m-nombre').value;
   const cM = document.getElementById('m-monto').value;
   const cD = document.getElementById('m-detalle').value;
+  const cId = detectar(pendiente.columnas, CAND.id);
+  const aviso = document.getElementById('map-aviso');
+  if(!cM){ aviso.textContent = 'Elegí cuál es la columna del monto.'; return; }
+
   const nuevos = [];
-  let sinMonto = 0;
+  let sinMonto = 0, ejemplo = '';
   for(const f of pendiente.filas){
-    const monto = parseMonto(f[cM]);
-    if(isNaN(monto) || monto === 0){ sinMonto++; continue; }
-    const d = parseFecha(f[cF]);
+    const bruto = f[cM];
+    const monto = parseMonto(bruto);
+    if(isNaN(monto) || monto === 0){
+      sinMonto++;
+      if(!ejemplo && String(bruto ?? '').trim()) ejemplo = String(bruto).slice(0,24);
+      continue;
+    }
+    const d = cF ? parseFecha(f[cF]) : null;
+    const sep = separarConcepto(cN ? f[cN] : '');
+    const detalle = (cD ? String(f[cD] ?? '').trim() : '') || sep.concepto;
+    const nombre = sep.nombre || detalle || 'Sin nombre';
+    const ref = cId ? String(f[cId] ?? '').trim() : '';
     nuevos.push({
-      nombre: String(f[cN] ?? '').trim() || 'Sin nombre',
-      monto,
+      nombre, monto, detalle,
+      id: ref ? 'ref-'+ref : undefined,
       fecha: d ? d.toISOString() : null,
-      dia: d ? `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}` : '',
-      detalle: cD ? String(f[cD] ?? '').trim() : ''
+      dia: d ? `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}` : ''
     });
   }
   if(!nuevos.length){
-    document.getElementById('map-aviso').textContent = 'Ninguna fila tiene un monto válido en esa columna. Probá con otra.';
+    aviso.textContent = ejemplo
+      ? `Esa columna tiene valores como "${ejemplo}", que no son montos. Probá con otra.`
+      : 'Esa columna está vacía. Probá con otra.';
     return;
   }
   const alta = sumar(nuevos);
@@ -500,7 +593,10 @@ async function confirmarMapeo(){
   cerrar();
   render();
   const repes = nuevos.length - alta;
-  alert(`Listo: ${alta} movimientos nuevos.` + (repes ? ` ${repes} ya estaban cargados.` : '') + (sinMonto ? ` ${sinMonto} filas sin monto quedaron afuera.` : ''));
+  alert(`Listo: ${alta} movimientos nuevos.` +
+        (repes ? ` ${repes} ya estaban cargados.` : '') +
+        (sinMonto ? ` ${sinMonto} filas sin monto quedaron afuera.` : '') +
+        (!cF ? ' Sin columna de fecha, quedan agrupados en "Sin fecha".' : ''));
 }
 
 /* ---------------- modales ---------------- */

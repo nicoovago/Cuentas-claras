@@ -9,7 +9,11 @@ Una sola página HTML, sin build, sin servidor, sin backend. Los datos se guarda
 - Importa el CSV de Mercado Pago (Actividad o Liberaciones) desde archivo o pegándolo como texto.
 - Detecta sola las columnas de fecha, nombre y monto; si tu reporte usa otros encabezados, los elegís a mano antes de importar.
 - Ordena por **fecha** (más nuevo / más viejo), **nombre** (A→Z / Z→A) o **monto**, y agrupa según el criterio: por día con el subtotal del día, o por letra inicial.
-- Entiende montos en formato argentino (`$ 15.000,50`) y fechas `DD/MM/AAAA` además de ISO.
+- Entiende montos en formato argentino (`$ 15.000,50`) y fechas `DD/MM/AAAA` o `DD-MM-AAAA` además de ISO.
+- Acepta CSV separados por coma o por punto y coma.
+- Saltea el bloque de resumen (`INITIAL_BALANCE`, `CREDITS`, `DEBITS`…) que Mercado Pago pone arriba del archivo y se queda con la tabla de movimientos.
+- El reporte no trae columna de nombre: la contraparte viene pegada al concepto (`Transferencia recibida Fulano`, `Pago con QR YPF`). La app separa el concepto del nombre.
+- Usa `REFERENCE_ID` para no duplicar movimientos si reimportás el mismo período.
 - Evita duplicados si reimportás el mismo reporte.
 - Buscador por nombre o detalle, carga manual, resumen por persona y exportación del listado ya ordenado.
 - Por defecto muestra solo entradas de dinero; hay un check para incluir las salidas.
