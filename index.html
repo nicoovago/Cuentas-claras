@@ -1,0 +1,606 @@
+<!DOCTYPE html>
+<html lang="es-AR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Depósitos · registro de Mercado Pago</title>
+<meta name="description" content="Registro local de depósitos: importá el CSV de Mercado Pago y ordenalo por fecha o por nombre. Los datos no salen del dispositivo.">
+<meta name="theme-color" content="#EFF2ED">
+<meta name="color-scheme" content="light">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=IBM+Plex+Mono:wght@400;500;600&family=Public+Sans:wght@400;500;600&display=swap');
+
+:root{
+  --papel:#EFF2ED;
+  --carta:#FFFFFF;
+  --tinta:#15201C;
+  --humo:#74837B;
+  --agua:#06697A;
+  --menta:#C7E7D8;
+  --ocre:#B4571A;
+  --linea:#D9DFD7;
+  --radio:14px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:var(--papel);color:var(--tinta);font-family:'Public Sans',system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+body{padding:0 0 96px}
+.mono{font-family:'IBM Plex Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums}
+.wrap{max-width:760px;margin:0 auto;padding:0 16px}
+
+/* ---------- encabezado ---------- */
+header.top{padding:28px 0 18px}
+.eyebrow{font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--humo)}
+h1{font-family:'Bricolage Grotesque','Public Sans',sans-serif;font-weight:700;font-size:clamp(30px,8vw,44px);line-height:1;letter-spacing:-.02em;margin:6px 0 18px}
+.total{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.total .cifra{font-family:'IBM Plex Mono',monospace;font-variant-numeric:tabular-nums;font-weight:600;font-size:clamp(26px,7vw,38px);letter-spacing:-.02em}
+.total .meta{font-size:13px;color:var(--humo)}
+
+/* ---------- controles ---------- */
+.controles{display:flex;gap:8px;flex-wrap:wrap;margin:18px 0 6px}
+input[type=search],select,input[type=text],input[type=number],input[type=date],textarea{
+  font-family:'Public Sans',sans-serif;font-size:14px;color:var(--tinta);
+  background:var(--carta);border:1px solid var(--linea);border-radius:10px;padding:10px 12px;outline:none}
+input[type=search]{flex:1 1 180px;min-width:0}
+select{flex:0 0 auto;appearance:none;padding-right:30px;
+  background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6'><path d='M0 0l5 6 5-6z' fill='%2374837B'/></svg>");
+  background-repeat:no-repeat;background-position:right 11px center}
+input:focus-visible,select:focus-visible,button:focus-visible,textarea:focus-visible{outline:2px solid var(--agua);outline-offset:2px}
+.chk{display:inline-flex;align-items:center;gap:7px;font-size:13px;color:var(--humo);padding:4px 2px;cursor:pointer}
+.chk input{accent-color:var(--agua)}
+
+/* ---------- lista ---------- */
+.grupo{margin-top:26px}
+.grupo-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px;padding:0 2px 7px}
+.grupo-tit{font-family:'IBM Plex Mono',monospace;font-size:11.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--tinta)}
+.grupo-sub{font-size:11.5px;color:var(--humo)}
+.grupo-tot{font-family:'IBM Plex Mono',monospace;font-variant-numeric:tabular-nums;font-size:13px;font-weight:500}
+.barra{height:3px;background:var(--linea);border-radius:2px;overflow:hidden;margin-bottom:10px}
+.barra span{display:block;height:100%;background:var(--agua);border-radius:2px}
+
+.fila{display:flex;align-items:center;gap:12px;background:var(--carta);border:1px solid var(--linea);
+  border-radius:var(--radio);padding:12px 14px;margin-bottom:7px}
+.chip{flex:0 0 34px;height:34px;border-radius:50%;background:var(--menta);color:#0d4a3c;
+  display:grid;place-items:center;font-weight:600;font-size:13px}
+.chip.neg{background:#F5DFCD;color:#7d3a0f}
+.datos{flex:1 1 auto;min-width:0}
+.nombre{font-weight:500;font-size:15px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sub{font-size:12px;color:var(--humo);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:2px}
+.monto{flex:0 0 auto;font-family:'IBM Plex Mono',monospace;font-variant-numeric:tabular-nums;font-size:14.5px;font-weight:500;text-align:right}
+.monto.neg{color:var(--ocre)}
+.borrar{flex:0 0 auto;background:none;border:0;color:var(--linea);font-size:18px;line-height:1;cursor:pointer;padding:4px}
+.fila:hover .borrar,.borrar:focus-visible{color:var(--humo)}
+
+/* ---------- vacío ---------- */
+.vacio{background:var(--carta);border:1px dashed var(--linea);border-radius:var(--radio);padding:22px;margin-top:22px}
+.vacio h2{font-family:'Bricolage Grotesque',sans-serif;font-size:19px;margin-bottom:10px}
+.vacio ol{margin:0 0 4px 18px;font-size:14px;line-height:1.65;color:#3b4a44}
+.vacio p{font-size:13px;color:var(--humo);margin-top:12px;line-height:1.55}
+
+/* ---------- botonera ---------- */
+.acciones{position:fixed;left:0;right:0;bottom:0;background:rgba(239,242,237,.94);backdrop-filter:blur(8px);
+  border-top:1px solid var(--linea);padding:10px 16px calc(10px + env(safe-area-inset-bottom))}
+.acciones .wrap{display:flex;gap:8px;padding:0}
+button.b{font-family:'Public Sans',sans-serif;font-size:14px;font-weight:500;border-radius:10px;padding:11px 14px;cursor:pointer;border:1px solid var(--linea);background:var(--carta);color:var(--tinta);flex:1 1 auto}
+button.b.pri{background:var(--agua);border-color:var(--agua);color:#fff}
+button.b.ghost{flex:0 0 auto;background:transparent}
+button.b:disabled{opacity:.45;cursor:not-allowed}
+
+/* ---------- modal ---------- */
+.velo{position:fixed;inset:0;background:rgba(21,32,28,.42);display:none;align-items:flex-end;justify-content:center;z-index:20}
+.velo.on{display:flex}
+.modal{background:var(--papel);width:100%;max-width:560px;max-height:88vh;overflow:auto;border-radius:18px 18px 0 0;padding:20px 18px calc(20px + env(safe-area-inset-bottom))}
+@media(min-width:640px){.velo{align-items:center}.modal{border-radius:18px}}
+.modal h2{font-family:'Bricolage Grotesque',sans-serif;font-size:20px;margin-bottom:4px}
+.modal .hint{font-size:13px;color:var(--humo);line-height:1.5;margin-bottom:16px}
+.campo{margin-bottom:12px}
+.campo label{display:block;font-family:'IBM Plex Mono',monospace;font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--humo);margin-bottom:5px}
+.campo select,.campo input,.campo textarea{width:100%}
+textarea{min-height:120px;resize:vertical;font-family:'IBM Plex Mono',monospace;font-size:12px}
+.modal-acc{display:flex;gap:8px;margin-top:16px}
+.aviso{font-size:12.5px;color:var(--ocre);margin-top:10px;min-height:16px}
+.hidden{display:none!important}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <header class="top">
+    <div class="eyebrow">Mercado Pago · dinero que entró</div>
+    <h1>Depósitos</h1>
+    <div class="total">
+      <span class="cifra" id="cifra">$ 0</span>
+      <span class="meta" id="meta">todavía no hay movimientos</span>
+    </div>
+  </header>
+
+  <div class="controles" id="controles">
+    <input type="search" id="buscar" placeholder="Buscar por nombre…" aria-label="Buscar por nombre">
+    <select id="orden" aria-label="Ordenar">
+      <option value="fecha-desc">Fecha · más nuevo</option>
+      <option value="fecha-asc">Fecha · más viejo</option>
+      <option value="nombre-asc">Nombre · A→Z</option>
+      <option value="nombre-desc">Nombre · Z→A</option>
+      <option value="monto-desc">Monto · mayor</option>
+      <option value="monto-asc">Monto · menor</option>
+    </select>
+    <label class="chk"><input type="checkbox" id="verSalidas"> Incluir salidas</label>
+  </div>
+
+  <div id="lista"></div>
+
+  <div class="vacio" id="vacio">
+    <h2>Traé tus movimientos</h2>
+    <ol>
+      <li>Entrá a Mercado Pago → <strong>Tu negocio → Reportes</strong> (o <strong>Actividad → Descargar</strong>).</li>
+      <li>Generá el reporte de <strong>Actividad</strong> o <strong>Liberaciones</strong> en formato <strong>CSV</strong>.</li>
+      <li>Tocá <strong>Importar CSV</strong> acá abajo y elegí el archivo.</li>
+    </ol>
+    <p>Reconozco solo las columnas de fecha, nombre y monto; si el archivo usa otros nombres, las elegís a mano. Nada sale de este dispositivo.</p>
+  </div>
+</div>
+
+<div class="acciones">
+  <div class="wrap">
+    <button class="b pri" id="btnImportar">Importar CSV</button>
+    <button class="b" id="btnAgregar">Agregar</button>
+    <button class="b ghost" id="btnMenu" aria-label="Más opciones">···</button>
+  </div>
+</div>
+<input type="file" id="archivo" accept=".csv,.txt,text/csv" class="hidden">
+
+<!-- modal: mapeo de columnas -->
+<div class="velo" id="velo-map">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="t-map">
+    <h2 id="t-map">Qué es cada columna</h2>
+    <p class="hint" id="map-hint"></p>
+    <div class="campo"><label for="m-fecha">Fecha</label><select id="m-fecha"></select></div>
+    <div class="campo"><label for="m-nombre">Nombre de quien pagó</label><select id="m-nombre"></select></div>
+    <div class="campo"><label for="m-monto">Monto</label><select id="m-monto"></select></div>
+    <div class="campo"><label for="m-detalle">Detalle (opcional)</label><select id="m-detalle"></select></div>
+    <div class="aviso" id="map-aviso"></div>
+    <div class="modal-acc">
+      <button class="b" data-cerrar>Cancelar</button>
+      <button class="b pri" id="map-ok">Importar</button>
+    </div>
+  </div>
+</div>
+
+<!-- modal: carga manual -->
+<div class="velo" id="velo-add">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="t-add">
+    <h2 id="t-add">Cargar un depósito</h2>
+    <p class="hint">Para lo que no aparece en el reporte todavía.</p>
+    <div class="campo"><label for="a-nombre">Nombre</label><input type="text" id="a-nombre" placeholder="Quién te pagó"></div>
+    <div class="campo"><label for="a-monto">Monto</label><input type="text" id="a-monto" inputmode="decimal" placeholder="15000,50"></div>
+    <div class="campo"><label for="a-fecha">Fecha</label><input type="date" id="a-fecha"></div>
+    <div class="campo"><label for="a-detalle">Detalle (opcional)</label><input type="text" id="a-detalle" placeholder="Seña, venta, alquiler…"></div>
+    <div class="aviso" id="add-aviso"></div>
+    <div class="modal-acc">
+      <button class="b" data-cerrar>Cancelar</button>
+      <button class="b pri" id="add-ok">Guardar</button>
+    </div>
+  </div>
+</div>
+
+<!-- modal: menú -->
+<div class="velo" id="velo-menu">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="t-menu">
+    <h2 id="t-menu">Opciones</h2>
+    <p class="hint" id="menu-hint"></p>
+    <div class="modal-acc" style="flex-direction:column">
+      <button class="b" id="btnPegar">Pegar el CSV como texto</button>
+      <button class="b" id="btnExportar">Exportar lo ordenado (CSV)</button>
+      <button class="b" id="btnPorNombre">Ver resumen por persona</button>
+      <button class="b" id="btnBorrar">Borrar todos los datos</button>
+      <button class="b" data-cerrar>Cerrar</button>
+    </div>
+  </div>
+</div>
+
+<!-- modal: pegar -->
+<div class="velo" id="velo-pegar">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="t-pegar">
+    <h2 id="t-pegar">Pegar el CSV</h2>
+    <p class="hint">Copiá el contenido del archivo y pegalo acá, con la fila de encabezados incluida.</p>
+    <textarea id="pegado" placeholder="Fecha,Nombre,Monto&#10;05/08/2026,Ana Ruiz,15000,50"></textarea>
+    <div class="modal-acc">
+      <button class="b" data-cerrar>Cancelar</button>
+      <button class="b pri" id="pegar-ok">Leer</button>
+    </div>
+  </div>
+</div>
+
+<!-- modal: resumen por persona -->
+<div class="velo" id="velo-resumen">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="t-res">
+    <h2 id="t-res">Por persona</h2>
+    <p class="hint" id="res-hint"></p>
+    <div id="res-lista"></div>
+    <div class="modal-acc"><button class="b" data-cerrar>Cerrar</button></div>
+  </div>
+</div>
+
+<script>
+const CLAVE = 'mp-depositos:v1';
+let items = [];
+let prefs = { orden:'fecha-desc', verSalidas:false };
+let pendiente = null; // { filas, columnas }
+
+/* ---------------- almacenamiento ----------------
+   Usa window.storage cuando existe (entorno de artifacts de Claude)
+   y localStorage cuando la app corre en un navegador común
+   (GitHub Pages, archivo local, etc.). Todo queda en el dispositivo. */
+const almacen = (() => {
+  const hayStorage = typeof window !== 'undefined' && window.storage && typeof window.storage.get === 'function';
+  if(hayStorage){
+    return {
+      leer: async k => { const r = await window.storage.get(k); return r && r.value ? r.value : null; },
+      escribir: async (k,v) => { await window.storage.set(k, v); },
+      borrar: async k => { await window.storage.delete(k); }
+    };
+  }
+  let hayLocal = false;
+  try{ localStorage.setItem('__t','1'); localStorage.removeItem('__t'); hayLocal = true; }catch(e){}
+  if(hayLocal){
+    return {
+      leer: async k => localStorage.getItem(k),
+      escribir: async (k,v) => localStorage.setItem(k, v),
+      borrar: async k => localStorage.removeItem(k)
+    };
+  }
+  const memoria = new Map(); // modo incógnito con storage bloqueado: dura la sesión
+  return {
+    leer: async k => memoria.get(k) ?? null,
+    escribir: async (k,v) => { memoria.set(k,v); },
+    borrar: async k => { memoria.delete(k); }
+  };
+})();
+
+async function guardar(){
+  try{
+    await almacen.escribir(CLAVE, JSON.stringify({items, prefs}));
+  }catch(e){ console.error('No se pudo guardar', e); }
+}
+async function cargar(){
+  try{
+    const raw = await almacen.leer(CLAVE);
+    if(raw){
+      const d = JSON.parse(raw);
+      items = Array.isArray(d.items) ? d.items : [];
+      prefs = Object.assign(prefs, d.prefs || {});
+    }
+  }catch(e){ /* primera vez: no hay nada guardado */ }
+}
+
+/* ---------------- parseo ---------------- */
+function parseMonto(raw){
+  if(typeof raw === 'number') return raw;
+  if(raw === null || raw === undefined) return NaN;
+  let s = String(raw).trim();
+  if(!s) return NaN;
+  const neg = /^\(.*\)$/.test(s) || /-/.test(s);
+  s = s.replace(/[^\d.,]/g,'');
+  if(!s) return NaN;
+  const pd = s.lastIndexOf('.'), pc = s.lastIndexOf(',');
+  let dec = -1;
+  if(pd > -1 && pc > -1) dec = Math.max(pd, pc);
+  else if(pc > -1) dec = (s.length - pc - 1) <= 2 ? pc : -1;
+  else if(pd > -1) dec = (s.length - pd - 1) <= 2 ? pd : -1;
+  let ent = dec > -1 ? s.slice(0,dec) : s;
+  const decs = dec > -1 ? s.slice(dec+1) : '';
+  ent = ent.replace(/[.,]/g,'');
+  const n = parseFloat((ent||'0') + (decs ? '.'+decs : ''));
+  if(isNaN(n)) return NaN;
+  return neg ? -Math.abs(n) : n;
+}
+function parseFecha(raw){
+  if(!raw) return null;
+  if(raw instanceof Date) return raw;
+  const s = String(raw).trim();
+  let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?:[T ](\d{1,2}):(\d{2}))?/);
+  if(m) return new Date(+m[1], +m[2]-1, +m[3], +(m[4]||0), +(m[5]||0));
+  m = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})(?:[T ,]+(\d{1,2}):(\d{2}))?/);
+  if(m){ let y = +m[3]; if(y < 100) y += 2000; return new Date(y, +m[2]-1, +m[1], +(m[4]||0), +(m[5]||0)); }
+  const d = new Date(s);
+  return isNaN(d.getTime()) ? null : d;
+}
+const norm = s => String(s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+function detectar(cols, candidatas){
+  for(const c of candidatas){
+    const hit = cols.find(col => norm(col) === c);
+    if(hit) return hit;
+  }
+  for(const c of candidatas){
+    const hit = cols.find(col => norm(col).includes(c));
+    if(hit) return hit;
+  }
+  return '';
+}
+const CAND = {
+  fecha:  ['release_date','date_created','fecha de origen','fecha','date','fecha de liberacion','money_release_date','fecha de aprobacion'],
+  nombre: ['payer_name','nombre','contraparte','payer','cliente','nombre del pagador','buyer','origen del dinero','remitente','de'],
+  monto:  ['net_credit_amount','transaction_net_amount','valor','importe','monto','amount','net_amount','transaction_amount','gross_amount','saldo a favor'],
+  detalle:['description','descripcion','detalle','reason','concepto','payment_method','medio de pago','operacion']
+};
+
+/* ---------------- formato ---------------- */
+const fmt = new Intl.NumberFormat('es-AR',{style:'currency',currency:'ARS',maximumFractionDigits:2});
+const plata = n => fmt.format(n).replace(/\s/g,' ');
+const DIAS = ['dom','lun','mar','mié','jue','vie','sáb'];
+const MESES = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+function etiquetaDia(iso){
+  const d = new Date(iso+'T12:00:00');
+  const hoy = new Date(); hoy.setHours(12,0,0,0);
+  const dif = Math.round((hoy - d)/86400000);
+  if(dif === 0) return 'Hoy';
+  if(dif === 1) return 'Ayer';
+  return `${DIAS[d.getDay()]} ${d.getDate()} ${MESES[d.getMonth()]}${d.getFullYear()!==hoy.getFullYear()?' '+d.getFullYear():''}`;
+}
+const hora = it => it.fecha ? new Date(it.fecha).toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'}) : '';
+const inicial = n => (String(n||'?').trim()[0] || '?').toUpperCase();
+
+/* ---------------- datos ---------------- */
+function clave(it){ return it.id || `${it.dia}|${norm(it.nombre)}|${it.monto}`; }
+function sumar(nuevos){
+  const vistos = new Set(items.map(clave));
+  let alta = 0;
+  for(const n of nuevos){
+    if(vistos.has(clave(n))) continue;
+    vistos.add(clave(n));
+    items.push(n); alta++;
+  }
+  return alta;
+}
+function visibles(){
+  const q = norm(document.getElementById('buscar').value.trim());
+  return items
+    .filter(it => prefs.verSalidas || it.monto > 0)
+    .filter(it => !q || norm(it.nombre).includes(q) || norm(it.detalle).includes(q));
+}
+function ordenar(arr){
+  const [campo, dir] = prefs.orden.split('-');
+  const s = dir === 'asc' ? 1 : -1;
+  return arr.slice().sort((a,b) => {
+    if(campo === 'nombre'){
+      const c = norm(a.nombre).localeCompare(norm(b.nombre),'es');
+      return c !== 0 ? c*s : (b.dia||'').localeCompare(a.dia||'');
+    }
+    if(campo === 'monto'){
+      const c = a.monto - b.monto;
+      return c !== 0 ? c*s : (b.dia||'').localeCompare(a.dia||'');
+    }
+    const c = (a.dia||'').localeCompare(b.dia||'') || ((a.fecha||'') < (b.fecha||'') ? -1 : 1);
+    return c*s;
+  });
+}
+
+/* ---------------- render ---------------- */
+function render(){
+  const vis = visibles();
+  const orden = ordenar(vis);
+  const total = vis.reduce((a,b) => a + b.monto, 0);
+
+  document.getElementById('cifra').textContent = plata(total);
+  document.getElementById('meta').textContent = items.length === 0
+    ? 'todavía no hay movimientos'
+    : `${vis.length} ${vis.length===1?'movimiento':'movimientos'}${vis.length!==items.length?` de ${items.length}`:''}`;
+  document.getElementById('vacio').classList.toggle('hidden', items.length > 0);
+  document.getElementById('controles').classList.toggle('hidden', items.length === 0);
+
+  const campo = prefs.orden.split('-')[0];
+  const cont = document.getElementById('lista');
+  cont.innerHTML = '';
+
+  if(orden.length === 0){ cont.innerHTML = items.length ? '<p class="sub" style="margin-top:22px">Nada coincide con esa búsqueda.</p>' : ''; return; }
+
+  // agrupar
+  const grupos = new Map();
+  for(const it of orden){
+    let g;
+    if(campo === 'nombre') g = inicial(it.nombre);
+    else if(campo === 'monto') g = '__todos';
+    else g = it.dia || 'sin fecha';
+    if(!grupos.has(g)) grupos.set(g, []);
+    grupos.get(g).push(it);
+  }
+  const maxG = Math.max(...[...grupos.values()].map(g => Math.abs(g.reduce((a,b)=>a+b.monto,0))), 1);
+
+  for(const [g, filas] of grupos){
+    const tot = filas.reduce((a,b) => a + b.monto, 0);
+    const sec = document.createElement('section');
+    sec.className = 'grupo';
+    if(g !== '__todos'){
+      const head = document.createElement('div');
+      head.className = 'grupo-head';
+      const tit = campo === 'nombre' ? g : (g === 'sin fecha' ? 'Sin fecha' : etiquetaDia(g));
+      head.innerHTML = `<div><span class="grupo-tit">${tit}</span> <span class="grupo-sub">· ${filas.length}</span></div>
+                        <span class="grupo-tot">${plata(tot)}</span>`;
+      sec.appendChild(head);
+      const barra = document.createElement('div');
+      barra.className = 'barra';
+      barra.innerHTML = `<span style="width:${Math.max(2, Math.abs(tot)/maxG*100)}%"></span>`;
+      sec.appendChild(barra);
+    }
+    for(const it of filas){
+      const fila = document.createElement('div');
+      fila.className = 'fila';
+      const neg = it.monto < 0;
+      const sub = [campo === 'nombre' && it.dia ? etiquetaDia(it.dia) : hora(it), it.detalle].filter(Boolean).join(' · ');
+      fila.innerHTML = `
+        <div class="chip ${neg?'neg':''}">${inicial(it.nombre)}</div>
+        <div class="datos">
+          <div class="nombre">${escapar(it.nombre || 'Sin nombre')}</div>
+          ${sub ? `<div class="sub">${escapar(sub)}</div>` : ''}
+        </div>
+        <div class="monto ${neg?'neg':''}">${plata(it.monto)}</div>
+        <button class="borrar" title="Quitar" aria-label="Quitar ${escapar(it.nombre)}">×</button>`;
+      fila.querySelector('.borrar').onclick = async () => {
+        items = items.filter(x => x !== it);
+        await guardar(); render();
+      };
+      sec.appendChild(fila);
+    }
+    cont.appendChild(sec);
+  }
+}
+function escapar(s){ return String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+/* ---------------- importar ---------------- */
+function leerCSV(texto){
+  const res = Papa.parse(texto.trim(), { header:true, skipEmptyLines:true, delimiter:'' });
+  const cols = (res.meta.fields || []).filter(Boolean);
+  if(!cols.length || !res.data.length){ alert('No pude leer ese archivo. Fijate que sea un CSV con una fila de encabezados.'); return; }
+  pendiente = { filas:res.data, columnas:cols };
+  abrirMapeo();
+}
+function abrirMapeo(){
+  const {columnas, filas} = pendiente;
+  document.getElementById('map-hint').textContent = `${filas.length} filas leídas. Revisá que estas sean las columnas correctas.`;
+  for(const campo of ['fecha','nombre','monto','detalle']){
+    const sel = document.getElementById('m-'+campo);
+    sel.innerHTML = (campo === 'detalle' ? '<option value="">— ninguna —</option>' : '') +
+      columnas.map(c => `<option value="${escapar(c)}">${escapar(c)}</option>`).join('');
+    const guess = detectar(columnas, CAND[campo]);
+    if(guess) sel.value = guess;
+  }
+  document.getElementById('map-aviso').textContent = '';
+  abrir('velo-map');
+}
+async function confirmarMapeo(){
+  const cF = document.getElementById('m-fecha').value;
+  const cN = document.getElementById('m-nombre').value;
+  const cM = document.getElementById('m-monto').value;
+  const cD = document.getElementById('m-detalle').value;
+  const nuevos = [];
+  let sinMonto = 0;
+  for(const f of pendiente.filas){
+    const monto = parseMonto(f[cM]);
+    if(isNaN(monto) || monto === 0){ sinMonto++; continue; }
+    const d = parseFecha(f[cF]);
+    nuevos.push({
+      nombre: String(f[cN] ?? '').trim() || 'Sin nombre',
+      monto,
+      fecha: d ? d.toISOString() : null,
+      dia: d ? `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}` : '',
+      detalle: cD ? String(f[cD] ?? '').trim() : ''
+    });
+  }
+  if(!nuevos.length){
+    document.getElementById('map-aviso').textContent = 'Ninguna fila tiene un monto válido en esa columna. Probá con otra.';
+    return;
+  }
+  const alta = sumar(nuevos);
+  await guardar();
+  cerrar();
+  render();
+  const repes = nuevos.length - alta;
+  alert(`Listo: ${alta} movimientos nuevos.` + (repes ? ` ${repes} ya estaban cargados.` : '') + (sinMonto ? ` ${sinMonto} filas sin monto quedaron afuera.` : ''));
+}
+
+/* ---------------- modales ---------------- */
+function abrir(id){ document.getElementById(id).classList.add('on'); }
+function cerrar(){ document.querySelectorAll('.velo').forEach(v => v.classList.remove('on')); }
+document.querySelectorAll('[data-cerrar]').forEach(b => b.onclick = cerrar);
+document.querySelectorAll('.velo').forEach(v => v.onclick = e => { if(e.target === v) cerrar(); });
+document.addEventListener('keydown', e => { if(e.key === 'Escape') cerrar(); });
+
+/* ---------------- eventos ---------------- */
+document.getElementById('btnImportar').onclick = () => document.getElementById('archivo').click();
+document.getElementById('archivo').onchange = e => {
+  const f = e.target.files[0];
+  if(!f) return;
+  const r = new FileReader();
+  r.onload = () => leerCSV(r.result);
+  r.onerror = () => alert('No pude abrir el archivo.');
+  r.readAsText(f, 'utf-8');
+  e.target.value = '';
+};
+document.getElementById('btnAgregar').onclick = () => {
+  document.getElementById('a-nombre').value = '';
+  document.getElementById('a-monto').value = '';
+  document.getElementById('a-detalle').value = '';
+  const h = new Date();
+  document.getElementById('a-fecha').value = `${h.getFullYear()}-${String(h.getMonth()+1).padStart(2,'0')}-${String(h.getDate()).padStart(2,'0')}`;
+  document.getElementById('add-aviso').textContent = '';
+  abrir('velo-add');
+};
+document.getElementById('add-ok').onclick = async () => {
+  const nombre = document.getElementById('a-nombre').value.trim();
+  const monto = parseMonto(document.getElementById('a-monto').value);
+  const fv = document.getElementById('a-fecha').value;
+  if(!nombre){ document.getElementById('add-aviso').textContent = 'Falta el nombre.'; return; }
+  if(isNaN(monto) || monto === 0){ document.getElementById('add-aviso').textContent = 'Poné un monto, por ejemplo 15000,50.'; return; }
+  const d = fv ? new Date(fv+'T12:00:00') : new Date();
+  items.push({
+    nombre, monto,
+    fecha: d.toISOString(),
+    dia: `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`,
+    detalle: document.getElementById('a-detalle').value.trim(),
+    id: 'manual-' + Date.now()
+  });
+  await guardar(); cerrar(); render();
+};
+document.getElementById('btnMenu').onclick = () => {
+  document.getElementById('menu-hint').textContent = `${items.length} movimientos guardados en este dispositivo.`;
+  abrir('velo-menu');
+};
+document.getElementById('btnPegar').onclick = () => { cerrar(); document.getElementById('pegado').value=''; abrir('velo-pegar'); };
+document.getElementById('pegar-ok').onclick = () => {
+  const t = document.getElementById('pegado').value.trim();
+  if(!t) return;
+  cerrar(); leerCSV(t);
+};
+document.getElementById('btnExportar').onclick = () => {
+  const filas = ordenar(visibles()).map(it => ({
+    Fecha: it.dia || '', Nombre: it.nombre, Monto: it.monto, Detalle: it.detalle || ''
+  }));
+  if(!filas.length){ alert('No hay nada para exportar todavía.'); return; }
+  const csv = Papa.unparse(filas);
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob(['\ufeff'+csv], {type:'text/csv;charset=utf-8'}));
+  a.download = 'depositos-ordenados.csv';
+  a.click();
+  URL.revokeObjectURL(a.href);
+  cerrar();
+};
+document.getElementById('btnPorNombre').onclick = () => {
+  const por = new Map();
+  for(const it of visibles()){
+    const k = it.nombre || 'Sin nombre';
+    const p = por.get(k) || {n:0, t:0, ult:''};
+    p.n++; p.t += it.monto; if((it.dia||'') > p.ult) p.ult = it.dia||'';
+    por.set(k, p);
+  }
+  const filas = [...por.entries()].sort((a,b) => b[1].t - a[1].t);
+  document.getElementById('res-hint').textContent = `${filas.length} personas, ordenadas por total.`;
+  document.getElementById('res-lista').innerHTML = filas.map(([n,p]) => `
+    <div class="fila">
+      <div class="chip">${inicial(n)}</div>
+      <div class="datos"><div class="nombre">${escapar(n)}</div>
+      <div class="sub">${p.n} ${p.n===1?'pago':'pagos'}${p.ult?' · último '+etiquetaDia(p.ult):''}</div></div>
+      <div class="monto">${plata(p.t)}</div>
+    </div>`).join('') || '<p class="sub">Sin datos.</p>';
+  cerrar(); abrir('velo-resumen');
+};
+document.getElementById('btnBorrar').onclick = async () => {
+  if(!confirm('Se borran los ' + items.length + ' movimientos guardados. ¿Seguís?')) return;
+  items = [];
+  try{ await almacen.borrar(CLAVE); }catch(e){}
+  cerrar(); render();
+};
+document.getElementById('buscar').oninput = render;
+document.getElementById('orden').onchange = async e => { prefs.orden = e.target.value; await guardar(); render(); };
+document.getElementById('verSalidas').onchange = async e => { prefs.verSalidas = e.target.checked; await guardar(); render(); };
+
+/* ---------------- arranque ---------------- */
+(async function(){
+  await cargar();
+  document.getElementById('orden').value = prefs.orden;
+  document.getElementById('verSalidas').checked = prefs.verSalidas;
+  render();
+})();
+</script>
+</body>
+</html>
