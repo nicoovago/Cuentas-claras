@@ -194,6 +194,7 @@ textarea{min-height:120px;resize:vertical;font-family:'IBM Plex Mono',monospace;
       <button class="b" id="btnPegar">Pegar el CSV como texto</button>
       <button class="b" id="btnExportar">Exportar lo ordenado (CSV)</button>
       <button class="b" id="btnPorNombre">Ver resumen por persona</button>
+      <button class="b" id="btnManual">Elegir columnas al importar</button>
       <button class="b" id="btnBorrar">Borrar todos los datos</button>
       <button class="b" data-cerrar>Cerrar</button>
     </div>
@@ -226,7 +227,7 @@ textarea{min-height:120px;resize:vertical;font-family:'IBM Plex Mono',monospace;
 <script>
 const CLAVE = 'mp-depositos:v1';
 let items = [];
-let prefs = { orden:'fecha-desc', verSalidas:false };
+let prefs = { orden:'fecha-desc', verSalidas:false, mapeoManual:false };
 let pendiente = null; // { filas, columnas }
 
 /* ---------------- almacenamiento ----------------
@@ -475,7 +476,7 @@ function render(){
 }
 function escapar(s){ return String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
-/* ---------------- importar ---------------- */
+/* ---------------- leer el archivo ---------------- */
 function leerCSV(texto){
   if(typeof Papa === 'undefined'){
     alert('No se cargó el lector de CSV. Revisá la conexión y recargá la página.');
@@ -500,7 +501,6 @@ function leerCSV(texto){
   const bloque = bloques.reduce((a,b) => (b.length > a.length ? b : a), []);
   if(bloque.length < 2){ alert('No encontré filas de movimientos en ese archivo.'); return; }
 
-  // encabezados: sin vacíos y sin repetidos
   const cuenta = {};
   const columnas = bloque[0].map((c,i) => {
     let n = String(c ?? '').trim() || `Columna ${i+1}`;
@@ -514,67 +514,100 @@ function leerCSV(texto){
   });
 
   pendiente = { filas:datos, columnas, bloques:bloques.length };
-  abrirMapeo();
+  const eleccion = elegirColumnas(columnas, datos);
+  if(eleccion.seguro && !prefs.mapeoManual) importar(eleccion, true);
+  else abrirMapeo(eleccion);
 }
-function muestra(campo){
-  const col = document.getElementById('m-'+campo).value;
-  const el = document.getElementById('mu-'+campo);
-  if(!col){ el.textContent = ''; return; }
-  const val = (pendiente.filas.find(f => String(f[col] ?? '').trim() !== '') || {})[col];
-  if(!val){ el.textContent = 'esta columna viene vacía'; return; }
-  const texto = campo === 'nombre' ? (separarConcepto(val).nombre || String(val)) : String(val);
-  el.textContent = `ej.: ${texto.slice(0,44)}`;
-}
-function abrirMapeo(){
-  const {columnas, filas, bloques} = pendiente;
-  document.getElementById('map-hint').textContent =
-    `${filas.length} movimientos encontrados${bloques > 1 ? ' (salteé el resumen del principio)' : ''}. Elegí qué columna es cada cosa; abajo de cada una ves un ejemplo.`;
-  const opciones = columnas.map(c => `<option value="${escapar(c)}">${escapar(c)}</option>`).join('');
-  const vacia = {
-    fecha:'<option value="">— elegí una —</option>',
-    monto:'<option value="">— elegí una —</option>',
-    nombre:'<option value="">— sin nombre —</option>',
-    detalle:'<option value="">— ninguna —</option>'
-  };
-  const hallado = {};
-  for(const campo of ['fecha','nombre','monto','detalle']){
-    const sel = document.getElementById('m-'+campo);
-    sel.innerHTML = vacia[campo] + opciones;
-    hallado[campo] = detectar(columnas, CAND[campo]);
-    sel.value = hallado[campo] || '';
-    sel.onchange = () => { muestra(campo); if(campo === 'detalle') muestra('nombre'); };
-  }
-  // Mercado Pago mete el nombre dentro del concepto: si detalle apunta a la
-  // misma columna que el nombre, la dejamos vacía para no repetir el texto
-  if(hallado.detalle && hallado.detalle === hallado.nombre) document.getElementById('m-detalle').value = '';
-  ['fecha','nombre','monto','detalle'].forEach(muestra);
-  document.getElementById('map-aviso').textContent = '';
-  abrir('velo-map');
-}
-async function confirmarMapeo(){
-  const cF = document.getElementById('m-fecha').value;
-  const cN = document.getElementById('m-nombre').value;
-  const cM = document.getElementById('m-monto').value;
-  const cD = document.getElementById('m-detalle').value;
-  const cId = detectar(pendiente.columnas, CAND.id);
-  const aviso = document.getElementById('map-aviso');
-  if(!cM){ aviso.textContent = 'Elegí cuál es la columna del monto.'; return; }
 
+/* ---------------- reconocer las columnas solo ----------------
+   Primero por el nombre del encabezado; si no alcanza, mirando qué
+   tienen adentro: cuántos valores son fechas, cuántos son montos,
+   cuántos son texto. Así también entra un reporte con encabezados
+   que no conozco. */
+const RX_FECHA = [/^\d{4}-\d{1,2}-\d{1,2}([T ]|$)/, /^\d{1,2}[\/\-.]\d{1,2}[\/\-.]\d{2,4}([T ,]|$)/];
+const esFecha = v => RX_FECHA.some(r => r.test(String(v).trim())) && parseFecha(v) !== null;
+const esMonto = v => {
+  const s = String(v).trim();
+  return !esFecha(s) && /^[-+]?\s*\$?\s*-?\d[\d.,]*$/.test(s) && !isNaN(parseMonto(s));
+};
+const esSaldo = c => /balance|saldo/i.test(c);
+
+function perfilar(columnas, filas){
+  const muestra = filas.slice(0, 300);
+  const p = {};
+  for(const c of columnas){
+    let fechas = 0, montos = 0, textos = 0, negativos = 0, decimales = 0, llenos = 0;
+    const unicos = new Set();
+    for(const f of muestra){
+      const v = String(f[c] ?? '').trim();
+      if(!v) continue;
+      llenos++; unicos.add(v);
+      if(esFecha(v)){ fechas++; continue; }
+      if(esMonto(v)){
+        montos++;
+        const n = parseMonto(v);
+        if(n < 0) negativos++;
+        if(/[.,]\d{1,2}$/.test(v)) decimales++;
+        continue;
+      }
+      textos++;
+    }
+    const base = Math.max(1, llenos);
+    p[c] = { fecha:fechas/base, monto:montos/base, texto:textos/base,
+             negativos, decimales, unicos:unicos.size, llenos };
+  }
+  return p;
+}
+
+function elegirColumnas(columnas, filas){
+  const p = perfilar(columnas, filas);
+  const porNombre = {};
+  for(const k of ['fecha','nombre','monto','detalle','id']) porNombre[k] = detectar(columnas, CAND[k]);
+
+  let fecha = (porNombre.fecha && p[porNombre.fecha].fecha > 0.6) ? porNombre.fecha : '';
+  if(!fecha) fecha = columnas.filter(c => p[c].fecha > 0.8).sort((a,b) => p[b].fecha - p[a].fecha)[0] || '';
+
+  let monto = (porNombre.monto && !esSaldo(porNombre.monto) && p[porNombre.monto].monto > 0.6) ? porNombre.monto : '';
+  if(!monto){
+    // un saldo acumulado y un id también son números: preferimos la columna
+    // con decimales y con signos negativos, y descartamos los identificadores
+    const idAparente = c => p[c].decimales === 0 && p[c].unicos === p[c].llenos;
+    monto = columnas
+      .filter(c => c !== fecha && p[c].monto > 0.8 && !esSaldo(c) && !idAparente(c))
+      .sort((a,b) => (p[b].negativos > 0) - (p[a].negativos > 0) || p[b].decimales - p[a].decimales)[0] || '';
+  }
+
+  let nombre = porNombre.nombre || '';
+  if(!nombre){
+    nombre = columnas
+      .filter(c => c !== fecha && c !== monto && p[c].texto > 0.5)
+      .sort((a,b) => p[b].unicos - p[a].unicos)[0] || '';
+  }
+  let detalle = porNombre.detalle || '';
+  if(detalle === nombre) detalle = '';
+
+  const seguro = !!(fecha && monto && p[fecha].fecha > 0.8 && p[monto].monto > 0.8);
+  return { fecha, nombre, monto, detalle, id:porNombre.id, seguro };
+}
+
+/* ---------------- importar ---------------- */
+async function importar(map, automatico){
+  const aviso = document.getElementById('map-aviso');
   const nuevos = [];
   let sinMonto = 0, ejemplo = '';
   for(const f of pendiente.filas){
-    const bruto = f[cM];
+    const bruto = f[map.monto];
     const monto = parseMonto(bruto);
     if(isNaN(monto) || monto === 0){
       sinMonto++;
       if(!ejemplo && String(bruto ?? '').trim()) ejemplo = String(bruto).slice(0,24);
       continue;
     }
-    const d = cF ? parseFecha(f[cF]) : null;
-    const sep = separarConcepto(cN ? f[cN] : '');
-    const detalle = (cD ? String(f[cD] ?? '').trim() : '') || sep.concepto;
+    const d = map.fecha ? parseFecha(f[map.fecha]) : null;
+    const sep = separarConcepto(map.nombre ? f[map.nombre] : '');
+    const detalle = (map.detalle ? String(f[map.detalle] ?? '').trim() : '') || sep.concepto;
     const nombre = sep.nombre || detalle || 'Sin nombre';
-    const ref = cId ? String(f[cId] ?? '').trim() : '';
+    const ref = map.id ? String(f[map.id] ?? '').trim() : '';
     nuevos.push({
       nombre, monto, detalle,
       id: ref ? 'ref-'+ref : undefined,
@@ -583,9 +616,11 @@ async function confirmarMapeo(){
     });
   }
   if(!nuevos.length){
-    aviso.textContent = ejemplo
-      ? `Esa columna tiene valores como "${ejemplo}", que no son montos. Probá con otra.`
-      : 'Esa columna está vacía. Probá con otra.';
+    const texto = ejemplo
+      ? `La columna "${map.monto}" tiene valores como "${ejemplo}", que no son montos.`
+      : 'No encontré montos válidos en ese archivo.';
+    if(automatico){ alert(texto + ' Elegí las columnas a mano.'); abrirMapeo(map); }
+    else aviso.textContent = texto + ' Probá con otra.';
     return;
   }
   const alta = sumar(nuevos);
@@ -596,7 +631,52 @@ async function confirmarMapeo(){
   alert(`Listo: ${alta} movimientos nuevos.` +
         (repes ? ` ${repes} ya estaban cargados.` : '') +
         (sinMonto ? ` ${sinMonto} filas sin monto quedaron afuera.` : '') +
-        (!cF ? ' Sin columna de fecha, quedan agrupados en "Sin fecha".' : ''));
+        (automatico ? `\n\nTomé "${map.fecha}" como fecha y "${map.monto}" como monto.` +
+                      ' Si no es lo que esperabas, activá "Elegir columnas al importar" en el menú ···' : '') +
+        (!map.fecha ? ' Sin columna de fecha, quedan agrupados en "Sin fecha".' : ''));
+}
+
+/* ---------------- elegir columnas a mano ---------------- */
+function ejemploDe(campo){
+  const col = document.getElementById('m-'+campo).value;
+  const el = document.getElementById('mu-'+campo);
+  if(!col){ el.textContent = ''; return; }
+  const val = (pendiente.filas.find(f => String(f[col] ?? '').trim() !== '') || {})[col];
+  if(!val){ el.textContent = 'esta columna viene vacía'; return; }
+  const texto = campo === 'nombre' ? (separarConcepto(val).nombre || String(val)) : String(val);
+  el.textContent = `ej.: ${texto.slice(0,44)}`;
+}
+function abrirMapeo(map){
+  const {columnas, filas, bloques} = pendiente;
+  document.getElementById('map-hint').textContent =
+    `${filas.length} movimientos encontrados${bloques > 1 ? ' (salteé el resumen del principio)' : ''}. Elegí qué columna es cada cosa; abajo de cada una ves un ejemplo.`;
+  const opciones = columnas.map(c => `<option value="${escapar(c)}">${escapar(c)}</option>`).join('');
+  const vacia = {
+    fecha:'<option value="">— elegí una —</option>',
+    monto:'<option value="">— elegí una —</option>',
+    nombre:'<option value="">— sin nombre —</option>',
+    detalle:'<option value="">— ninguna —</option>'
+  };
+  for(const campo of ['fecha','nombre','monto','detalle']){
+    const sel = document.getElementById('m-'+campo);
+    sel.innerHTML = vacia[campo] + opciones;
+    sel.value = (map && map[campo]) || '';
+    sel.onchange = () => ejemploDe(campo);
+    ejemploDe(campo);
+  }
+  document.getElementById('map-aviso').textContent = '';
+  abrir('velo-map');
+}
+async function confirmarMapeo(){
+  const map = {
+    fecha:  document.getElementById('m-fecha').value,
+    nombre: document.getElementById('m-nombre').value,
+    monto:  document.getElementById('m-monto').value,
+    detalle:document.getElementById('m-detalle').value,
+    id:     detectar(pendiente.columnas, CAND.id)
+  };
+  if(!map.monto){ document.getElementById('map-aviso').textContent = 'Elegí cuál es la columna del monto.'; return; }
+  await importar(map, false);
 }
 
 /* ---------------- modales ---------------- */
@@ -645,6 +725,7 @@ document.getElementById('add-ok').onclick = async () => {
 };
 document.getElementById('btnMenu').onclick = () => {
   document.getElementById('menu-hint').textContent = `${items.length} movimientos guardados en este dispositivo.`;
+  etiquetaManual();
   abrir('velo-menu');
 };
 document.getElementById('btnPegar').onclick = () => { cerrar(); document.getElementById('pegado').value=''; abrir('velo-pegar'); };
@@ -685,6 +766,15 @@ document.getElementById('btnPorNombre').onclick = () => {
     </div>`).join('') || '<p class="sub">Sin datos.</p>';
   cerrar(); abrir('velo-resumen');
 };
+document.getElementById('btnManual').onclick = async () => {
+  prefs.mapeoManual = !prefs.mapeoManual;
+  await guardar();
+  etiquetaManual();
+};
+function etiquetaManual(){
+  document.getElementById('btnManual').textContent =
+    prefs.mapeoManual ? 'Elegir columnas al importar: sí' : 'Elegir columnas al importar: no';
+}
 document.getElementById('btnBorrar').onclick = async () => {
   if(!confirm('Se borran los ' + items.length + ' movimientos guardados. ¿Seguís?')) return;
   items = [];
@@ -700,6 +790,7 @@ document.getElementById('verSalidas').onchange = async e => { prefs.verSalidas =
   await cargar();
   document.getElementById('orden').value = prefs.orden;
   document.getElementById('verSalidas').checked = prefs.verSalidas;
+  etiquetaManual();
   render();
 })();
 </script>
