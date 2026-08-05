@@ -449,6 +449,10 @@ function escapar(s){ return String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;'
 
 /* ---------------- importar ---------------- */
 function leerCSV(texto){
+  if(typeof Papa === 'undefined'){
+    alert('No se cargó el lector de CSV. Revisá la conexión y recargá la página.');
+    return;
+  }
   const res = Papa.parse(texto.trim(), { header:true, skipEmptyLines:true, delimiter:'' });
   const cols = (res.meta.fields || []).filter(Boolean);
   if(!cols.length || !res.data.length){ alert('No pude leer ese archivo. Fijate que sea un CSV con una fila de encabezados.'); return; }
@@ -507,6 +511,7 @@ document.querySelectorAll('.velo').forEach(v => v.onclick = e => { if(e.target =
 document.addEventListener('keydown', e => { if(e.key === 'Escape') cerrar(); });
 
 /* ---------------- eventos ---------------- */
+document.getElementById('map-ok').onclick = confirmarMapeo;
 document.getElementById('btnImportar').onclick = () => document.getElementById('archivo').click();
 document.getElementById('archivo').onchange = e => {
   const f = e.target.files[0];
